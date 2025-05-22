@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Simple Apache Kafka cluster with EC2 instances and Security Groups
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.small
+    Description: EC2 instance type for Kafka brokers
+
+Resources:
+  KafkaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Kafka broker SG
+      VpcId: <vpc-00a22d417f36b6e7e>
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 9092
+          ToPort: 9092
+          CidrIp: 0.0.0.0/0
+
+  KafkaBrokerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: ami-0123456789abcdef0 # Amazon Linux 2
+        InstanceType: !Ref InstanceType
+        SecurityGroupIds: [ !Ref KafkaSecurityGroup ]
+        UserData: !Base64 |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install java-openjdk11 -y
+          # Install Zookeeper
+          yum install -y git
+          git clone https://github.com/apache/zookeeper.git /opt/zookeeper
+          # ... additional init
+          # Install Kafka
+          wget https://downloads.apache.org/kafka/3.3.1/kafka_2.13-3.3.1.tgz -P /opt
+          tar -xzf /opt/kafka_2.13-3.3.1.tgz -C /opt
+          # Start Zookeeper and Kafka
+          nohup /opt/zookeeper/bin/zkServer.sh start &
+          nohup /opt/kafka_2.13-3.3.1/bin/kafka-server-start.sh /opt/kafka_2.13-3.3.1/config/server.properties &
+
+  KafkaAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref KafkaBrokerLaunchTemplate
+        Version: !GetAtt KafkaBrokerLaunchTemplate.LatestVersionNumber
+      MinSize: '3'
+      MaxSize: '3'
+      VPCZoneIdentifier:
+        - <subnet-0ffad71c47bf57506>
+        - <subnet-08453128f96f409c0>
+        - <subnet-0841fd9b8af9c910e>
+
+Outputs:
+  BrokerInstances:
+    Value: !Join [ ",", !GetAtt KafkaAutoScalingGroup.Instances ]
+    Description: List of Kafka broker instance IDs
